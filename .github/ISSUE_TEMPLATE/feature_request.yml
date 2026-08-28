@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a collection source, project shape, API, or workflow improvement.
+title: ""
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Consumer-app use case
+      description: Describe the application, platform, and dependency source that needs support.
+    validations:
+      required: true
+  - type: textarea
+    id: current-gap
+    attributes:
+      label: Current gap
+      description: Explain what cannot be collected or presented with the current package.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Reproducible input
+      description: Link or attach a minimal public fixture, metadata format, or upstream specification.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: State the observable result without prescribing an implementation.
+    validations:
+      required: true

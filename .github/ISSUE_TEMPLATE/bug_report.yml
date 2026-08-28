@@ -1,0 +1,71 @@
+name: Bug report
+description: Report incorrect collection, setup, runtime, or uninstall behavior.
+title: ""
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Android
+        - iOS
+        - macOS
+        - Web
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: flutter-version
+    attributes:
+      label: Flutter version
+      placeholder: Output of flutter --version
+    validations:
+      required: true
+  - type: input
+    id: package-version
+    attributes:
+      label: Package version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: build-mode
+    attributes:
+      label: Build mode
+      options:
+        - Debug
+        - Profile
+        - Release
+        - Not build-related
+    validations:
+      required: true
+  - type: textarea
+    id: setup-check
+    attributes:
+      label: Setup check output
+      description: Paste the output of dart run flutter_native_oss_licenses:setup --check.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest project shape, dependency, or sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Include build or runtime output with secrets removed.
+      render: text

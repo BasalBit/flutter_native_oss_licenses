@@ -1,0 +1,416 @@
+import Foundation
+
+private struct LicenseEntry: Codable {
+  let packages: [String]
+  let text: String
+}
+
+private struct RemotePin: Hashable {
+  let identity: String
+  let location: String
+  let revision: String
+
+  var canonicalKey: String {
+    "\(canonicalRepositoryLocation(location))@\(revision.lowercased())"
+  }
+}
+
+private enum CollectorError: LocalizedError {
+  case invalidArguments
+  case invalidAcknowledgements(String)
+  case invalidResolvedFile(String)
+  case conflictingPins(String)
+  case missingCheckout(String)
+  case checkoutMismatch(String)
+  case missingLegalText(String)
+  case unreadableLegalText(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidArguments:
+      return "Expected: <acknowledgements-or-dash> <SourcePackages> <project-root> <apple-project-root> <output>"
+    case .invalidAcknowledgements(let path):
+      return "CocoaPods acknowledgements are malformed: \(path)"
+    case .invalidResolvedFile(let path):
+      return "SwiftPM resolution data is malformed or unsupported: \(path)"
+    case .conflictingPins(let identity):
+      return "SwiftPM resolution files contain conflicting pins for \(identity)."
+    case .missingCheckout(let identity):
+      return "No resolved SwiftPM checkout was found for remote package \(identity)."
+    case .checkoutMismatch(let identity):
+      return "No SwiftPM checkout for \(identity) matches both its remote URL and pinned revision."
+    case .missingLegalText(let identity):
+      return "Remote SwiftPM package \(identity) has no root legal file."
+    case .unreadableLegalText(let path):
+      return "A SwiftPM legal file is not valid UTF-8: \(path)"
+    }
+  }
+}
+
+private final class LicenseCollector {
+  private let fileManager = FileManager.default
+  private var packagesByText: [String: Set<String>] = [:]
+
+  func run(
+    acknowledgementsPath: String,
+    sourcePackages: URL,
+    projectRoot: URL,
+    appleProjectRoot: URL,
+    output: URL
+  ) throws {
+    let flutterPluginNames = try loadFlutterPluginNames(
+      projectRoot: projectRoot,
+      platform: appleProjectRoot.lastPathComponent
+    )
+    if acknowledgementsPath != "-" {
+      try collectCocoaPods(
+        from: URL(fileURLWithPath: acknowledgementsPath),
+        excluding: flutterPluginNames
+      )
+    }
+
+    let pins = try loadRemotePins(appleProjectRoot: appleProjectRoot)
+    for pin in pins.sorted(by: { $0.identity < $1.identity }) {
+      try collectSwiftPackage(
+        pin,
+        checkoutRoots: checkoutRoots(
+          sourcePackages: sourcePackages,
+          projectRoot: projectRoot
+        )
+      )
+    }
+
+    let entries = packagesByText.map { text, packages in
+      LicenseEntry(packages: packages.sorted(), text: text)
+    }.sorted { left, right in
+      let leftName = left.packages.first ?? ""
+      let rightName = right.packages.first ?? ""
+      return leftName == rightName ? left.text < right.text : leftName < rightName
+    }
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    var data = try encoder.encode(entries)
+    data.append(0x0A)
+    try fileManager.createDirectory(
+      at: output.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+    try data.write(to: output, options: .atomic)
+  }
+
+  private func add(package: String, text: String) {
+    let name = package.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !name.isEmpty, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return
+    }
+    packagesByText[text, default: []].insert(name)
+  }
+
+  private func loadFlutterPluginNames(
+    projectRoot: URL,
+    platform: String
+  ) throws -> Set<String> {
+    var names: Set<String> = [
+      "Flutter",
+      "FlutterMacOS",
+      "flutter_native_oss_licenses",
+    ]
+    let dependencies = projectRoot.appendingPathComponent(".flutter-plugins-dependencies")
+    guard fileManager.fileExists(atPath: dependencies.path) else {
+      return names
+    }
+
+    let object = try JSONSerialization.jsonObject(with: Data(contentsOf: dependencies))
+    guard
+      let root = object as? [String: Any],
+      let plugins = root["plugins"] as? [String: Any]
+    else {
+      return names
+    }
+    for plugin in plugins[platform] as? [[String: Any]] ?? [] {
+      if let name = plugin["name"] as? String {
+        names.insert(name)
+      }
+    }
+    return names
+  }
+
+  private func collectCocoaPods(from url: URL, excluding names: Set<String>) throws {
+    let data = try Data(contentsOf: url)
+    let object = try PropertyListSerialization.propertyList(from: data, format: nil)
+    guard
+      let root = object as? [String: Any],
+      let specifiers = root["PreferenceSpecifiers"] as? [[String: Any]],
+      specifiers.count >= 2,
+      specifiers.first?["Title"] as? String == "Acknowledgements",
+      specifiers.last?["FooterText"] as? String ==
+        "Generated by CocoaPods - https://cocoapods.org"
+    else {
+      throw CollectorError.invalidAcknowledgements(url.path)
+    }
+
+    for specifier in specifiers.dropFirst().dropLast() {
+      guard
+        specifier["Type"] as? String == "PSGroupSpecifier",
+        let title = specifier["Title"] as? String,
+        let text = specifier["FooterText"] as? String
+      else {
+        continue
+      }
+      if names.contains(title) {
+        continue
+      }
+      add(package: title, text: text)
+    }
+  }
+
+  private func loadRemotePins(appleProjectRoot: URL) throws -> Set<RemotePin> {
+    guard let children = try? fileManager.contentsOfDirectory(
+      at: appleProjectRoot,
+      includingPropertiesForKeys: [.isDirectoryKey],
+      options: [.skipsHiddenFiles]
+    ) else {
+      return []
+    }
+
+    var resolvedFiles: [URL] = []
+    for child in children {
+      if child.pathExtension == "xcworkspace" {
+        resolvedFiles.append(
+          child.appendingPathComponent("xcshareddata/swiftpm/Package.resolved")
+        )
+      } else if child.pathExtension == "xcodeproj" {
+        resolvedFiles.append(
+          child.appendingPathComponent(
+            "project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+          )
+        )
+      }
+    }
+
+    var pinsByCanonicalKey: [String: RemotePin] = [:]
+    var keyByIdentity: [String: String] = [:]
+    for url in resolvedFiles.sorted(by: { $0.path < $1.path }) {
+      guard fileManager.fileExists(atPath: url.path) else {
+        continue
+      }
+      for pin in try parseResolvedFile(url) {
+        let identityKey = pin.identity.lowercased()
+        if let priorKey = keyByIdentity[identityKey], priorKey != pin.canonicalKey {
+          throw CollectorError.conflictingPins(pin.identity)
+        }
+        keyByIdentity[identityKey] = pin.canonicalKey
+        pinsByCanonicalKey[pin.canonicalKey] = pin
+      }
+    }
+    return Set(pinsByCanonicalKey.values)
+  }
+
+  private func parseResolvedFile(_ url: URL) throws -> Set<RemotePin> {
+    let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+    guard let root = object as? [String: Any] else {
+      throw CollectorError.invalidResolvedFile(url.path)
+    }
+
+    guard let version = root["version"] as? Int else {
+      throw CollectorError.invalidResolvedFile(url.path)
+    }
+
+    let rawPins: [[String: Any]]
+    switch version {
+    case 1:
+      guard
+        let legacyObject = root["object"] as? [String: Any],
+        let pins = legacyObject["pins"] as? [[String: Any]]
+      else {
+        throw CollectorError.invalidResolvedFile(url.path)
+      }
+      rawPins = pins
+    case 2, 3:
+      guard let pins = root["pins"] as? [[String: Any]] else {
+        throw CollectorError.invalidResolvedFile(url.path)
+      }
+      rawPins = pins
+    default:
+      throw CollectorError.invalidResolvedFile(url.path)
+    }
+
+    var pins: Set<RemotePin> = []
+    for value in rawPins {
+      let kind = (value["kind"] as? String)?.lowercased()
+      if version >= 2 && kind != "remotesourcecontrol" {
+        continue
+      }
+      guard let location = (value["location"] ?? value["repositoryURL"]) as? String else {
+        throw CollectorError.invalidResolvedFile(url.path)
+      }
+      if !isRemoteLocation(location) {
+        continue
+      }
+      guard let state = value["state"] as? [String: Any],
+            let revision = state["revision"] as? String,
+            !revision.isEmpty
+      else {
+        throw CollectorError.invalidResolvedFile(url.path)
+      }
+      let identity = ((value["identity"] ?? value["package"]) as? String)
+        ?? packageName(from: location)
+      let normalizedIdentity = identity.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !normalizedIdentity.isEmpty {
+        pins.insert(
+          RemotePin(
+            identity: normalizedIdentity,
+            location: location,
+            revision: revision
+          )
+        )
+      }
+    }
+    return pins
+  }
+
+  private func isRemoteLocation(_ location: String) -> Bool {
+    let lower = location.lowercased()
+    return lower.hasPrefix("https://") ||
+      lower.hasPrefix("http://") ||
+      lower.hasPrefix("ssh://") ||
+      lower.hasPrefix("git://") ||
+      lower.contains("@") && lower.contains(":")
+  }
+
+  private func packageName(from location: String) -> String {
+    var value = location.split(separator: "/").last.map(String.init) ?? location
+    if value.contains(":"), let suffix = value.split(separator: ":").last {
+      value = String(suffix)
+    }
+    return value.hasSuffix(".git") ? String(value.dropLast(4)) : value
+  }
+
+  private func checkoutRoots(sourcePackages: URL, projectRoot: URL) -> [URL] {
+    [
+      sourcePackages.appendingPathComponent("checkouts", isDirectory: true),
+      projectRoot.appendingPathComponent(".build/checkouts", isDirectory: true),
+    ]
+  }
+
+  private func collectSwiftPackage(_ pin: RemotePin, checkoutRoots: [URL]) throws {
+    var directories: [URL] = []
+    for root in checkoutRoots where fileManager.fileExists(atPath: root.path) {
+      directories.append(
+        contentsOf: contentsOfDirectoryIfPresent(root).filter { url in
+          (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
+      )
+    }
+    guard !directories.isEmpty else {
+      throw CollectorError.missingCheckout(pin.identity)
+    }
+    guard let checkout = directories.first(where: { checkoutMatches($0, pin: pin) }) else {
+      throw CollectorError.checkoutMismatch(pin.identity)
+    }
+
+    let prefixes = ["LICENSE", "LICENCE", "COPYING", "NOTICE", "COPYRIGHT"]
+    let legalFiles = try fileManager.contentsOfDirectory(
+      at: checkout,
+      includingPropertiesForKeys: [.isRegularFileKey],
+      options: [.skipsHiddenFiles]
+    ).filter { url in
+      let isFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+      let upperName = url.lastPathComponent.uppercased()
+      return isFile && prefixes.contains(where: upperName.hasPrefix)
+    }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+    guard !legalFiles.isEmpty else {
+      throw CollectorError.missingLegalText(pin.identity)
+    }
+    let texts = try legalFiles.map { url -> String in
+      guard let text = String(data: try Data(contentsOf: url), encoding: .utf8) else {
+        throw CollectorError.unreadableLegalText(url.path)
+      }
+      return text
+    }
+    let text = texts.joined(separator: "\n\n")
+    guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw CollectorError.missingLegalText(pin.identity)
+    }
+    add(package: pin.identity, text: text)
+  }
+
+  private func contentsOfDirectoryIfPresent(_ url: URL) -> [URL] {
+    (try? fileManager.contentsOfDirectory(
+      at: url,
+      includingPropertiesForKeys: [.isDirectoryKey],
+      options: [.skipsHiddenFiles]
+    )) ?? []
+  }
+
+  private func checkoutMatches(_ checkout: URL, pin: RemotePin) -> Bool {
+    guard
+      let remote = git(["-C", checkout.path, "remote", "get-url", "origin"]),
+      let revision = git(["-C", checkout.path, "rev-parse", "HEAD"])
+    else {
+      return false
+    }
+    return canonicalRepositoryLocation(remote) == canonicalRepositoryLocation(pin.location) &&
+      revision.lowercased() == pin.revision.lowercased()
+  }
+
+  private func git(_ arguments: [String]) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    let output = Pipe()
+    process.standardOutput = output
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+      guard process.terminationStatus == 0 else {
+        return nil
+      }
+      return String(
+        data: output.fileHandleForReading.readDataToEndOfFile(),
+        encoding: .utf8
+      )?.trimmingCharacters(in: .whitespacesAndNewlines)
+    } catch {
+      return nil
+    }
+  }
+}
+
+private func canonicalRepositoryLocation(_ value: String) -> String {
+  var location = value.trimmingCharacters(in: .whitespacesAndNewlines)
+  if location.hasPrefix("git@"), let colon = location.firstIndex(of: ":") {
+    let host = location[location.index(location.startIndex, offsetBy: 4)..<colon]
+    let path = location[location.index(after: colon)...]
+    location = "\(host)/\(path)"
+  } else if let url = URL(string: location), let host = url.host {
+    location = host + url.path
+  }
+  while location.hasSuffix("/") {
+    location.removeLast()
+  }
+  if location.lowercased().hasSuffix(".git") {
+    location.removeLast(4)
+  }
+  return location.lowercased()
+}
+
+do {
+  guard CommandLine.arguments.count == 6 else {
+    throw CollectorError.invalidArguments
+  }
+  let arguments = CommandLine.arguments
+  try LicenseCollector().run(
+    acknowledgementsPath: arguments[1],
+    sourcePackages: URL(fileURLWithPath: arguments[2], isDirectory: true),
+    projectRoot: URL(fileURLWithPath: arguments[3], isDirectory: true),
+    appleProjectRoot: URL(fileURLWithPath: arguments[4], isDirectory: true),
+    output: URL(fileURLWithPath: arguments[5])
+  )
+} catch {
+  let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+  FileHandle.standardError.write(Data("error: \(message)\n".utf8))
+  exit(1)
+}
