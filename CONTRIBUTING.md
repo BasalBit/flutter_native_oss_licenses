@@ -2,6 +2,10 @@
 
 Bug reports and focused pull requests are welcome.
 
+Fork the repository, create a branch for the change, and open a pull request
+against `main`. Contributions are merged after maintainer review and the
+required checks pass.
+
 For a bug, include:
 
 - Flutter and Dart versions;
