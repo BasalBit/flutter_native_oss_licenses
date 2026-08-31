@@ -212,13 +212,26 @@ Source limitations that affect the output:
 
 ## Maintainer publication gate
 
-Run the complete pub.dev quality gate before publishing:
+On macOS, validate a clean release candidate with:
 
 ```sh
-sh tool/verify_pub_points.sh
+sh tool/publish_release.sh check
 ```
 
-It checks formatting, static analysis, tests, dependency freshness, the
-publication archive, and the current official `pana` score. Pub.dev analyzes the
-uploaded archive again, so maintainers should also inspect the published
-package's Scores tab after every release.
+Publish the same commit manually with:
+
+```sh
+sh tool/publish_release.sh publish
+```
+
+The script requires a clean `main` that matches `origin/main`, synchronized
+version metadata, an unpublished version, and no matching release tag. It runs
+formatting, static analysis, tests, dependency checks, the publication archive,
+and the current official `pana` score before calling the interactive
+`dart pub publish` command.
+
+Authentication remains with Dart's user-level browser login. The script does
+not accept or print credentials, use `--force`, or create a Git tag. Do not push
+a matching tag after a manual publication because the tag workflow would try to
+publish the same version again. Inspect the published package's Scores tab after
+every release.

@@ -30,3 +30,6 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
+
+# Maintainer release tooling is tracked but omitted from the pub archive.
+/tool/publish_release.sh
