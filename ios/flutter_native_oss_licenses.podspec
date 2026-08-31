@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_native_oss_licenses'
-  s.version          = '0.1.0'
+  s.version          = '1.0.0'
   s.summary          = 'Collects Flutter, CocoaPods, and SwiftPM license notices.'
   s.description      = <<-DESC
 Merges Flutter license notices with CocoaPods acknowledgements and remote Swift Package Manager dependency licenses.

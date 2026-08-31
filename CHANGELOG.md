@@ -1,4 +1,4 @@
-## 0.1.0
+## 1.0.0
 
 - Add a deterministic API that merges Flutter, Android Gradle, CocoaPods, and
   remote Swift Package Manager license records.
