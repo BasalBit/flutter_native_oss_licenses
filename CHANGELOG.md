@@ -1,3 +1,11 @@
+## 1.0.1
+
+- Describe setup as a one-time native build integration for Android, iOS, and
+  macOS, with explicit instructions for dependency changes, package upgrades,
+  CI, and regenerated platform projects.
+- Update the bundled integration skill so Web, Linux, and Windows-only apps
+  skip native setup and native checks run only where applicable.
+
 ## 1.0.0
 
 - Add a deterministic API that merges Flutter, Android Gradle, CocoaPods, and

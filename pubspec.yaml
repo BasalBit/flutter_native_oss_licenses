@@ -2,7 +2,7 @@ name: flutter_native_oss_licenses
 description: >-
   Collects Flutter/Dart and native dependency licenses in one list: Android
   Gradle, CocoaPods, and remote SwiftPM, with all Flutter platforms supported.
-version: 1.0.0
+version: 1.0.1
 homepage: https://basalbit.com/
 repository: https://github.com/BasalBit/flutter_native_oss_licenses
 issue_tracker: https://github.com/BasalBit/flutter_native_oss_licenses/issues

@@ -16,13 +16,40 @@ the Dart dependency graph.
 
 ## Quick start
 
-Add the package and install its build integration from the Flutter application's
-root:
+Add the package from the Flutter application's root:
 
 ```sh
 flutter pub add flutter_native_oss_licenses
+```
+
+### Install the native build integration
+
+If the application ships on Android, iOS, or macOS, install the package's native
+build integration:
+
+```sh
 dart run flutter_native_oss_licenses:setup
 ```
+
+This command adds the Gradle and Xcode build hooks that collect the leaf
+application's native dependencies and bundle their notices. It does not create
+a one-time license snapshot. After installation, ordinary platform builds
+regenerate the native notices whenever the resolved dependencies change.
+
+| Situation | Run the command? |
+| --- | --- |
+| First adding this package to an app that ships on Android, iOS, or macOS | Yes, once from the application root |
+| Adding a native platform later, regenerating its project files, or changing the Apple dependency-manager setup | Yes; install the integration into the updated host project |
+| Changing Gradle, CocoaPods, or SwiftPM dependencies | No; the next platform build regenerates the notices |
+| Upgrading `flutter_native_oss_licenses` | Run `setup --check`; rerun setup only if the check reports stale integration |
+| Building on CI or from a fresh checkout | No, provided the generated files and host-project edits are committed; use `--check` to verify them |
+| Shipping only on Web, Linux, or Windows | No; these platforms use Flutter's license registry directly |
+
+The command is idempotent. Commit its generated files and marker-delimited
+host-project changes so local and CI builds use the same integration. Without
+this integration, Android, CocoaPods, and SwiftPM notices are not collected;
+the package can still return the notices already present in Flutter's license
+registry.
 
 Register native notices before `runApp`, then open Flutter's normal license
 page wherever the application exposes legal notices:
@@ -40,9 +67,6 @@ void main() {
 // From an About, Settings, or Legal screen:
 showLicensePage(context: context);
 ```
-
-The setup command is idempotent. Commit its generated files and marker-delimited
-host-project changes so local and CI builds use the same integration.
 
 ![Flutter's standard license page in the example application](screenshots/license-page.png)
 
@@ -85,8 +109,9 @@ additional package metadata or license classification is required.
 | Linux | Flutter/Dart and explicitly declared notice files |
 | Windows | Flutter/Dart and explicitly declared notice files |
 
-The native collectors run during ordinary platform builds after setup. There is
-no separate generation command to remember when dependencies change.
+The native collectors run during ordinary platform builds after the native
+build integration is installed. There is no separate generation command to
+remember when dependencies change.
 
 ## Load a merged list for a custom UI or export
 
@@ -113,7 +138,8 @@ Flutter's standard license screen.
 
 ## Verify an integration
 
-Check the host configuration without changing files:
+For an application that ships on Android, iOS, or macOS, check the host
+configuration without changing files:
 
 ```sh
 dart run flutter_native_oss_licenses:setup --check
@@ -158,8 +184,8 @@ manager does not supply usable license metadata.
 
 ### Android Gradle dependencies
 
-Setup pins Google's OSS Licenses Gradle plugin `0.13.0`. A variant-aware task
-converts Google's byte-range metadata to
+The installed Android build integration pins Google's OSS Licenses Gradle
+plugin `0.13.0`. A variant-aware task converts Google's byte-range metadata to
 `flutter_native_oss_licenses/licenses.json` and attaches it as a regular Android
 asset. The asset survives minification and resource shrinking.
 
@@ -181,6 +207,9 @@ is missing. Generated JSON is placed in the built application bundle and loaded
 by the platform plugin.
 
 ## Remove the build integration
+
+If native build integration was installed, remove it before removing the Dart
+dependency:
 
 ```sh
 dart run flutter_native_oss_licenses:setup --uninstall

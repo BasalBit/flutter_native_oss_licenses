@@ -22,20 +22,36 @@ package inventory but cannot see the app's native dependency graphs.
 Confirm that the consumer uses Flutter 3.44 or newer and identify its Android,
 iOS, macOS, Web, Linux, and Windows targets.
 
-## Install the build integration
+## Install the package and native build integration
 
 Run from the consumer directory that contains `pubspec.yaml`:
 
 ```sh
 flutter pub add flutter_native_oss_licenses
+```
+
+When the consumer has an Android, iOS, or macOS application target, install the
+native build integration once from the same directory:
+
+```sh
 dart run flutter_native_oss_licenses:setup
 ```
 
-Preserve unrelated host-project content and let the setup command manage its
-marker-delimited Gradle and Xcode changes. Rerunning setup is safe. Commit the
-generated files and host-project edits so CI receives the same integration.
+This installs the Gradle and Xcode hooks that regenerate native notices during
+ordinary builds. Dependency changes need no setup rerun. After upgrading
+`flutter_native_oss_licenses`, run `setup --check` and rerun setup only when the
+check reports stale integration. Run setup again after adding a native platform,
+regenerating its host project, or changing the Apple dependency-manager setup.
+Preserve unrelated host-project content and let the command manage its
+marker-delimited changes. Commit the generated files and host-project edits so
+CI receives the same integration.
 
-Confirm installation without changing files:
+For a Web, Linux, or Windows-only consumer, finish this step after adding the
+package. Those platforms use Flutter's license registry and need no native build
+integration.
+
+For Android, iOS, or macOS consumers, confirm installation without changing
+files:
 
 ```sh
 dart run flutter_native_oss_licenses:setup --check
@@ -94,10 +110,15 @@ license text.
 
 ## Validate distributed variants
 
-Run:
+For Android, iOS, or macOS consumers, run:
 
 ```sh
 dart run flutter_native_oss_licenses:setup --check
+```
+
+For every consumer, run:
+
+```sh
 flutter analyze
 flutter test
 ```
@@ -117,12 +138,14 @@ Report that the package collects available metadata rather than claiming legal
 completeness: Android Maven records can be absent or URL-only, and unmanaged
 components require explicit notice files.
 
-Finish when setup check passes, distributed release variants build, users can
-reach the notice UI, and representative Flutter and native entries are present.
+Finish when the applicable setup check passes, distributed release variants
+build, users can reach the notice UI, and representative entries from every
+configured source are present.
 
 ## Remove the integration
 
-Use the package-owned rollback before removing the Dart dependency:
+If native build integration was installed, use the package-owned rollback
+before removing the Dart dependency:
 
 ```sh
 dart run flutter_native_oss_licenses:setup --uninstall
